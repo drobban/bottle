@@ -1,3 +1,4 @@
+# use Mix.Config
 # This file is responsible for configuring your umbrella
 # and **all applications** and their dependencies with the
 # help of the Config module.
@@ -16,3 +17,24 @@ import Config
 #       format: "$date $time [$level] $metadata$message\n",
 #       metadata: [:user_id]
 #
+
+if Mix.env() != :prod do
+  config :git_hooks,
+    auto_install: true,
+    verbose: true,
+    hooks: [
+      pre_commit: [
+        tasks: [
+          {:cmd, "mix format"}
+        ]
+      ],
+      pre_push: [
+        verbose: false,
+        tasks: [
+          # {:cmd, "mix dialyzer"},
+          {:cmd, "mix test"},
+          {:cmd, "echo 'success!'"}
+        ]
+      ]
+    ]
+end

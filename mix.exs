@@ -16,6 +16,8 @@ defmodule Bottle.MixProject do
   #
   # Run "mix help deps" for examples and options.
   defp deps do
-    []
+    [
+      {:git_hooks, "~> 0.5.0", only: [:test, :dev], runtime: false}
+    ]
   end
 end
