@@ -1,0 +1,2 @@
+defmodule Trades do
+end

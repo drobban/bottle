@@ -32,5 +32,11 @@ defmodule Streamer.Binance do
     }
 
     Logger.debug("Trade event recieved: #{inspect(trade_event)}")
+
+    Phoenix.PubSub.broadcast(
+      Streamer.PubSub,
+      "trade:#{trade_event.symbol}",
+      trade_event
+    )
   end
 end
