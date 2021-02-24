@@ -11,14 +11,15 @@ defmodule Streamer.Application do
       {
         Phoenix.PubSub,
         name: Streamer.PubSub, adapter_name: Phoenix.PubSub.PG2
-      }
+      },
+      {Streamer.Supervisor, []}
       # Starts a worker by calling: Streamer.Worker.start_link(arg)
       # {Streamer.Worker, arg}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
-    opts = [strategy: :one_for_one, name: Streamer.Supervisor]
+    opts = [strategy: :one_for_one, name: Streamer.Application]
     Supervisor.start_link(children, opts)
   end
 end
