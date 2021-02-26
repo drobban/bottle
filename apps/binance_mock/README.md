@@ -1,21 +1,16 @@
 # BinanceMock
 
-**TODO: Add description**
+mocks 
 
-## Installation
+``` elixir
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `binance_mock` to your list of dependencies in `mix.exs`:
+get_exchange_info/0
 
-```elixir
-def deps do
-  [
-    {:binance_mock, "~> 0.1.0"}
-  ]
-end
+order_limit_buy/4
+
+order_limit_sell/4
+
+get_order/3
+
 ```
-
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at [https://hexdocs.pm/binance_mock](https://hexdocs.pm/binance_mock).
 

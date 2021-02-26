@@ -49,8 +49,8 @@ defmodule Trades.Leader do
   end
 
   def handle_info(event, state) do
-    Logger.info("Inside leader")
-    Logger.debug("#{inspect(event)}")
+    # Logger.info("Inside leader")
+    # Logger.debug("#{inspect(event)}")
     {:noreply, state}
   end
 end
