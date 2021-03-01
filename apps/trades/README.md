@@ -2,7 +2,6 @@
 
 Trading bot module
 
-
 ## Fee schedule
 
 ### Binance
