@@ -10,13 +10,14 @@
 # move said applications out of the umbrella.
 import Config
 
-# Sample configuration:
-#
-#     config :logger, :console,
-#       level: :info,
-#       format: "$date $time [$level] $metadata$message\n",
-#       metadata: [:user_id]
-#
+config :data_manager, DataManager.Repo,
+  database: "data_manager_repo",
+  username: "postgres",
+  password: "postpassword",
+  hostname: "localhost",
+  port: 5432
+
+config :data_manager, ecto_repos: [DataManager.Repo]
 
 if Mix.env() != :prod do
   config :git_hooks,
