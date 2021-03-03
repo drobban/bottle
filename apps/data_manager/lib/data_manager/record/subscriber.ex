@@ -25,8 +25,13 @@ defmodule DataManager.Record.Subscriber do
   end
 
   def handle_info(event, state) do
-    Logger.info("Inside DataManager")
-    Logger.debug("#{inspect(event)}")
+    e = struct(DataManager.TradeEvent, Map.from_struct(event))
+
+    case DataManager.Repo.insert(e) do
+      {:ok, inserted_event} -> Logger.debug("Inserted #{inserted_event.id}")
+      _default -> Logger.warning("Failed to insert event")
+    end
+
     {:noreply, state}
   end
 end

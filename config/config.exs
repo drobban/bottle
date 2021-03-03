@@ -15,7 +15,8 @@ config :data_manager, DataManager.Repo,
   username: "postgres",
   password: "postpassword",
   hostname: "localhost",
-  port: 5432
+  port: 5432,
+  log: false
 
 config :data_manager, ecto_repos: [DataManager.Repo]
 
