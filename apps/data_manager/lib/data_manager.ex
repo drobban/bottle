@@ -3,16 +3,10 @@ defmodule DataManager do
   Documentation for `DataManager`.
   """
 
-  @doc """
-  Hello world.
+  alias DataManager.Record.DynamicRecordSupervisor
 
-  ## Examples
-
-      iex> DataManager.hello()
-      :world
-
-  """
-  def hello do
-    :world
-  end
+  defdelegate start_recording(symbol), to: DynamicRecordSupervisor
+  defdelegate stop_recording(symbol), to: DynamicRecordSupervisor
+  # defdelegate start_sim_stream(symbol, from, to), to: DynamicRecordSupervisor
+  # defdelegate stop_sim_stream(symbol, from, to), to: DynamicRecordSupervisor
 end
