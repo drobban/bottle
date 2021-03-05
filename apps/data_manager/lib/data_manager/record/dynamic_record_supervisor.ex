@@ -26,6 +26,9 @@ defmodule DataManager.Record.DynamicRecordSupervisor do
   end
 
   def stop_recording(symbol) when is_binary(symbol) do
+    # This is something that we should take into account during the development
+    # Do we kill the recording process when the trading halts?
+    # We do want to keep track of the trading history and in that case the recording should continue
     symbol = String.upcase(symbol)
 
     case get_pid(symbol) do
@@ -34,6 +37,7 @@ defmodule DataManager.Record.DynamicRecordSupervisor do
 
       pid ->
         Logger.info("Stopping recording on #{symbol}")
+        Streamer.stop_streaming(symbol)
 
         :ok =
           DynamicSupervisor.terminate_child(

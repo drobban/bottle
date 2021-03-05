@@ -31,6 +31,11 @@ defmodule Streamer.Binance do
     {:ok, state}
   end
 
+  def handle_disconnect(connection_status_map, state) do
+    Logger.error("#{inspect(connection_status_map)}")
+    {:reconnect, state}
+  end
+
   def handle_event(%{"e" => "trade"} = event, state) do
     trade_event = %Streamer.Binance.TradeEvent{
       :event_type => event["e"],

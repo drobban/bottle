@@ -37,7 +37,7 @@ defmodule Streamer.DynamicStreamerSupervisor do
 
         :ok =
           DynamicSupervisor.terminate_child(
-            Streamer.DynamicStreamerSupervisor,
+            __MODULE__,
             pid
           )
 
@@ -51,7 +51,7 @@ defmodule Streamer.DynamicStreamerSupervisor do
 
   defp start_streamer(symbol) do
     DynamicSupervisor.start_child(
-      Streamer.DynamicStreamerSupervisor,
+      __MODULE__,
       {Streamer.Binance, symbol}
     )
   end
