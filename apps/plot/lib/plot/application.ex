@@ -9,12 +9,10 @@ defmodule Plot.Application do
   def start(_type, _args) do
     children = [
       # Starts a worker by calling: Plot.Worker.start_link(arg)
-      # {Plot.Worker, arg}
+      {Plot.Supervisor, []}
     ]
 
-    # See https://hexdocs.pm/elixir/Supervisor.html
-    # for other strategies and supported options
-    opts = [strategy: :one_for_one, name: Plot.Supervisor]
+    opts = [strategy: :one_for_one, name: Plot.AppSupervisor]
     Supervisor.start_link(children, opts)
   end
 end
