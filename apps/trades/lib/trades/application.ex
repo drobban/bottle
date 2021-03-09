@@ -8,8 +8,6 @@ defmodule Trades.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      # Starts a worker by calling: Trades.Worker.start_link(arg)
-      # {Trades.Worker, arg}
       {Trades.Leader, %Trades.Leader.State{:symbol => "xrpeur"}}
     ]
 
