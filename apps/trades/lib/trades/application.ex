@@ -8,12 +8,11 @@ defmodule Trades.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      {Trades.Leader, %Trades.Leader.State{:symbol => "xrpeur"}}
+      # {Trades.Leader, %Trades.Leader.State{:symbol => "xrpeur"}}
+      {Trades.Supervisor, []}
     ]
 
-    # See https://hexdocs.pm/elixir/Supervisor.html
-    # for other strategies and supported options
-    opts = [strategy: :one_for_one, name: Trades.Supervisor]
+    opts = [strategy: :one_for_one, name: Trades.Application]
     Supervisor.start_link(children, opts)
   end
 end

@@ -5,7 +5,7 @@ defmodule Trades.Leader do
   alias Decimal, as: D
 
   @short 60 * 3
-  @long 60 * 15
+  @long 60 * 25
   @trend 3600 * 3
 
   defmodule Mas do
@@ -48,13 +48,21 @@ defmodule Trades.Leader do
     ]
   end
 
-  def start_link(%State{} = state) do
-    GenServer.start_link(__MODULE__, state)
+  def start_link(symbol) do
+    Logger.debug("Starting link: #{__MODULE__}-#{symbol}")
+
+    GenServer.start_link(
+      __MODULE__,
+      %State{
+        symbol: symbol,
+        mas: %Mas{}
+      },
+      name: :"#{__MODULE__}-#{symbol}"
+    )
   end
 
-  def init(%State{symbol: symbol} = state) do
+  def init(%State{symbol: symbol, mas: mas} = state) do
     symbol = String.downcase(symbol)
-    new_state = %{state | mas: %Mas{}}
 
     Streamer.start_streaming(symbol)
 
@@ -63,10 +71,11 @@ defmodule Trades.Leader do
       "trade_events:#{symbol}"
     )
 
-    {:ok, new_state}
+    {:ok, state}
   end
 
   def handle_info(event, state) do
+    symbol = String.downcase(state.symbol)
     mas = state.mas
     td_now = DateTime.now!("Etc/UTC")
 
@@ -95,7 +104,7 @@ defmodule Trades.Leader do
 
     Phoenix.PubSub.broadcast(
       Streamer.PubSub,
-      "ma_events:#{state.symbol}",
+      "ma_events:#{symbol}",
       %{
         short_ma: new_mas.short_ma,
         long_ma: new_mas.long_ma,

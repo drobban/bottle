@@ -52,7 +52,7 @@ defmodule Plot.Subscriber do
 
     if !Enum.empty?(state.trades) do
       try do
-        stat =
+        _stat =
           plot(
             [
               [:set, :term, :pngcairo],
@@ -89,7 +89,7 @@ defmodule Plot.Subscriber do
   end
 
   def handle_info(
-        %{short_ma: short_ma, long_ma: long_ma, trend_ma: trend_ma, ts: ts} = ma_event,
+        %{short_ma: short_ma, long_ma: long_ma, trend_ma: trend_ma, ts: ts},
         state
       ) do
     short = [[ts, short_ma]] ++ state.ma_short
