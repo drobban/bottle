@@ -26,8 +26,9 @@ defmodule Plot.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:gnuplot, "~> 1.20"},
+      {:gnuplot, "~> 1.20.320"},
       {:phoenix_pubsub, "~> 2.0"},
+      {:decimal, "~> 2.0"},
       {:streamer, in_umbrella: true}
     ]
   end

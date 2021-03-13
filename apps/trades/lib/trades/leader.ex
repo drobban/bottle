@@ -3,21 +3,24 @@ defmodule Trades.Leader do
 
   require Logger
   alias Decimal, as: D
+  D.Context.set(%D.Context{D.Context.get() | precision: 9})
 
-  @short 60 * 3
-  @long 60 * 25
-  @trend 3600 * 3
+  @short 60 * 10
+  @long 60 * 120
+  @trend 3600 * 24
+  @delta_limit 10
 
   defmodule Mas do
-    defstruct short_ma: [[0, 0]],
-              long_ma: [[0, 0]],
-              trend_ma: [[0, 0]],
-              short_events: [[0, 0]],
-              long_events: [[0, 0]],
-              trend_events: [[0, 0]],
+    defstruct short_ma: [[0, Decimal.new(0)]],
+              long_ma: [[0, Decimal.new(0)]],
+              trend_ma: [[0, Decimal.new(0)]],
+              short_events: [[0, Decimal.new(0)]],
+              long_events: [[0, Decimal.new(0)]],
+              trend_events: [[0, Decimal.new(0)]],
               short_acc: 0,
               long_acc: 0,
-              trend_acc: 0
+              trend_acc: 0,
+              trend_deltas: [[0, Decimal.new(0)]]
   end
 
   defmodule State do
@@ -35,7 +38,8 @@ defmodule Trades.Leader do
     defstruct [
       # :id,
       :symbol,
-      :mas
+      :mas,
+      :conclusion
       # :budget,
       # :buy_order,
       # :sell_order,
@@ -61,7 +65,7 @@ defmodule Trades.Leader do
     )
   end
 
-  def init(%State{symbol: symbol, mas: mas} = state) do
+  def init(%State{symbol: symbol, mas: _mas} = state) do
     symbol = String.downcase(symbol)
 
     Streamer.start_streaming(symbol)
@@ -88,27 +92,35 @@ defmodule Trades.Leader do
     {ma_trend, trend_events, trend_acc} =
       update_ma(td_now, event, {mas.trend_ma, mas.trend_events, mas.trend_acc}, @trend)
 
-    new_mas = %Mas{
-      short_ma: ma_short,
-      short_acc: short_acc,
-      short_events: short_events,
-      long_ma: ma_long,
-      long_acc: long_acc,
-      long_events: long_events,
-      trend_ma: ma_trend,
-      trend_acc: trend_acc,
-      trend_events: trend_events
+    new_mas = %{
+      mas
+      | short_ma: ma_short,
+        short_acc: short_acc,
+        short_events: short_events,
+        long_ma: ma_long,
+        long_acc: long_acc,
+        long_events: long_events,
+        trend_ma: ma_trend,
+        trend_acc: trend_acc,
+        trend_events: trend_events
     }
 
-    new_state = %{state | mas: new_mas}
+    %{trend: _status, trade: _buy_sell, trend_deltas: new_deltas} =
+      conclusion(new_mas, @delta_limit)
+
+    new_state = %{state | mas: %{new_mas | trend_deltas: new_deltas}}
+
+    [_, sma] = Enum.at(new_mas.short_ma, -1)
+    [_, lma] = Enum.at(new_mas.long_ma, -1)
+    [_, tma] = Enum.at(new_mas.trend_ma, -1)
 
     Phoenix.PubSub.broadcast(
       Streamer.PubSub,
       "ma_events:#{symbol}",
       %{
-        short_ma: new_mas.short_ma,
-        long_ma: new_mas.long_ma,
-        trend_ma: new_mas.trend_ma,
+        short_ma: sma,
+        long_ma: lma,
+        trend_ma: tma,
         ts: DateTime.to_unix(td_now, :millisecond)
       }
     )
@@ -116,13 +128,63 @@ defmodule Trades.Leader do
     {:noreply, new_state}
   end
 
+  defp calc_delta([prev_ma, current_ma]) do
+    [current_time, current_price] = current_ma
+    [prev_time, prev_price] = prev_ma
+    y = D.sub(current_time, prev_time)
+    x = D.sub(current_price, prev_price)
+
+    delta =
+      if D.eq?(y, 0) do
+        D.new(0)
+      else
+        D.div(x, y)
+      end
+
+    [current_time, delta]
+  end
+
+  defp conclusion(%Mas{} = mas, time_limit) do
+    td_now = DateTime.now!("Etc/UTC")
+    h_limit = DateTime.add(td_now, -time_limit, :second)
+    ts = DateTime.to_unix(h_limit, :millisecond)
+
+    {_, a_mas} = Enum.split(mas.trend_ma, -2)
+
+    ma_delta =
+      case a_mas do
+        [_, _] -> calc_delta(a_mas)
+        _default -> [0, Decimal.new(0)]
+      end
+
+    trend_deltas = mas.trend_deltas ++ [ma_delta]
+
+    {_old_deltas, new_deltas} =
+      Enum.split_with(trend_deltas, fn e ->
+        [time, _avg] = e
+        time < ts
+      end)
+
+    if Enum.count(new_deltas) > 1 do
+      avg =
+        D.div(
+          Enum.reduce(new_deltas, 0, fn [_time, delta], acc -> D.add(acc, delta) end),
+          Enum.count(new_deltas)
+        )
+
+      Logger.debug("#{inspect(avg)}")
+    end
+
+    %{trend: :none, trade: :none, trend_deltas: new_deltas}
+  end
+
   defp update_ma(
          td_now,
          %Streamer.Binance.TradeEvent{trade_time: t_time, price: price},
-         {ma, events, acc},
+         {mas, events, acc},
          period
        ) do
-    {price, _} = Float.parse(price)
+    price = Decimal.new(price)
     h_limit = DateTime.add(td_now, -period, :second)
     ts = DateTime.to_unix(h_limit, :millisecond)
 
@@ -134,11 +196,18 @@ defmodule Trades.Leader do
         time < ts
       end)
 
-    old_events_acc = Enum.reduce(old_events, 0, fn [_t, p], acc -> p + acc end)
+    old_events_acc = Enum.reduce(old_events, 0, fn [_t, p], acc -> D.add(p, acc) end)
 
-    new_acc = acc + price - old_events_acc
-    new_ma = new_acc / Enum.count(new_events)
+    new_acc = Decimal.sub(Decimal.add(acc, price), old_events_acc)
 
-    {new_ma, new_events, new_acc}
+    mas = mas ++ [[t_time, Decimal.div(new_acc, Enum.count(new_events))]]
+
+    {_old_mas, new_mas} =
+      Enum.split_with(mas, fn e ->
+        [time, _price] = e
+        time < ts
+      end)
+
+    {new_mas, new_events, new_acc}
   end
 end

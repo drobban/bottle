@@ -1,5 +1,6 @@
 defmodule Plot.Subscriber do
   use GenServer, restart: :temporary
+  require Decimal
   import Gnuplot
 
   require Logger
@@ -92,9 +93,9 @@ defmodule Plot.Subscriber do
         %{short_ma: short_ma, long_ma: long_ma, trend_ma: trend_ma, ts: ts},
         state
       ) do
-    short = [[ts, short_ma]] ++ state.ma_short
-    long = [[ts, long_ma]] ++ state.ma_long
-    trend = [[ts, trend_ma]] ++ state.ma_trend
+    short = [[ts, Decimal.to_float(short_ma)]] ++ state.ma_short
+    long = [[ts, Decimal.to_float(long_ma)]] ++ state.ma_long
+    trend = [[ts, Decimal.to_float(trend_ma)]] ++ state.ma_trend
 
     ma_short =
       Enum.filter(short, fn e ->
