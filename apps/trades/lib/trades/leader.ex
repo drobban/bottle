@@ -39,7 +39,8 @@ defmodule Trades.Leader do
       # :id,
       :symbol,
       :mas,
-      :conclusion
+      :trend,
+      :signal
       # :budget,
       # :buy_order,
       # :sell_order,
@@ -105,10 +106,25 @@ defmodule Trades.Leader do
         trend_events: trend_events
     }
 
-    %{trend: _status, trade: _buy_sell, trend_deltas: new_deltas} =
-      conclusion(new_mas, @delta_limit)
+    %{trend: trend, trade: signal, trend_deltas: new_deltas} = conclusion(new_mas, @delta_limit)
 
-    new_state = %{state | mas: %{new_mas | trend_deltas: new_deltas}}
+    case state do
+      %State{trend: old_trend} when old_trend != trend ->
+        Logger.debug("#{inspect(trend)} - #{inspect(signal)}")
+
+      %State{signal: old_signal} when old_signal != signal ->
+        Logger.debug("#{inspect(trend)} - #{inspect(signal)}")
+
+      _ ->
+        None
+    end
+
+    new_state = %{
+      state
+      | trend: trend,
+        signal: signal,
+        mas: %{new_mas | trend_deltas: new_deltas}
+    }
 
     [_, sma] = Enum.at(new_mas.short_ma, -1)
     [_, lma] = Enum.at(new_mas.long_ma, -1)
@@ -165,17 +181,34 @@ defmodule Trades.Leader do
         time < ts
       end)
 
-    if Enum.count(new_deltas) > 1 do
-      avg =
+    avg =
+      if Enum.count(new_deltas) > 1 do
         D.div(
           Enum.reduce(new_deltas, 0, fn [_time, delta], acc -> D.add(acc, delta) end),
           Enum.count(new_deltas)
         )
+      else
+        D.new(0)
+      end
 
-      Logger.debug("#{inspect(avg)}")
-    end
+    trend =
+      cond do
+        D.gt?(avg, "0") -> :bull
+        D.lt?(avg, "0") -> :bear
+        true -> :neutral
+      end
 
-    %{trend: :none, trade: :none, trend_deltas: new_deltas}
+    [_t, short_ma] = Enum.at(mas.short_ma, -1)
+    [_t, long_ma] = Enum.at(mas.long_ma, -1)
+
+    signal =
+      cond do
+        D.gt?(short_ma, long_ma) -> :sell
+        D.lt?(short_ma, long_ma) -> :buy
+        true -> :neutral
+      end
+
+    %{trend: trend, trade: signal, trend_deltas: new_deltas}
   end
 
   defp update_ma(
