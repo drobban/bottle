@@ -20,6 +20,11 @@ config :data_manager, DataManager.Repo,
 
 config :data_manager, ecto_repos: [DataManager.Repo]
 
+config :logger,
+  compile_time_purge_matching: [
+    [level_lower_than: :info]
+  ]
+
 if Mix.env() != :prod do
   config :git_hooks,
     auto_install: true,

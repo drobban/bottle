@@ -14,7 +14,7 @@ defmodule Plot.Subscriber do
   end
 
   def start_link(symbol) do
-    Logger.debug("Starting link: #{__MODULE__}-#{symbol}")
+    Logger.notice("Starting link: #{__MODULE__}-#{symbol}")
 
     GenServer.start_link(
       __MODULE__,

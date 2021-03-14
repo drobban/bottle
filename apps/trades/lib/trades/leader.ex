@@ -54,7 +54,7 @@ defmodule Trades.Leader do
   end
 
   def start_link(symbol) do
-    Logger.debug("Starting link: #{__MODULE__}-#{symbol}")
+    Logger.notice("Starting link: #{__MODULE__}-#{symbol}")
 
     GenServer.start_link(
       __MODULE__,
@@ -110,10 +110,10 @@ defmodule Trades.Leader do
 
     case state do
       %State{trend: old_trend} when old_trend != trend ->
-        Logger.debug("#{inspect(trend)} - #{inspect(signal)}")
+        Logger.info("#{inspect(trend)} - #{inspect(signal)}")
 
       %State{signal: old_signal} when old_signal != signal ->
-        Logger.debug("#{inspect(trend)} - #{inspect(signal)}")
+        Logger.info("#{inspect(trend)} - #{inspect(signal)}")
 
       _ ->
         None
