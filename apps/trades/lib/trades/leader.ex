@@ -233,7 +233,14 @@ defmodule Trades.Leader do
 
     new_acc = Decimal.sub(Decimal.add(acc, price), old_events_acc)
 
-    mas = mas ++ [[t_time, Decimal.div(new_acc, Enum.count(new_events))]]
+    # mas = mas ++ [[t_time, Decimal.div(new_acc, Enum.count(new_events))]]
+    new_ta =
+      case Enum.count(new_events) do
+        0 -> [[0, Decimal.new(0)]]
+        n_events -> [[t_time, Decimal.div(new_acc, n_events)]]
+      end
+
+    mas = mas ++ new_ta
 
     {_old_mas, new_mas} =
       Enum.split_with(mas, fn e ->
