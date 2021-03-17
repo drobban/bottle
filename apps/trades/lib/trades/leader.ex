@@ -108,16 +108,16 @@ defmodule Trades.Leader do
 
     %{trend: trend, trade: signal, trend_deltas: new_deltas} = conclusion(new_mas, @delta_limit)
 
-    case state do
-      %State{trend: old_trend} when old_trend != trend ->
-        Logger.info("#{inspect(trend)} - #{inspect(signal)}")
+    # case state do
+    #   %State{trend: old_trend} when old_trend != trend ->
+    #     Logger.info("#{inspect(trend)} - #{inspect(signal)}")
 
-      %State{signal: old_signal} when old_signal != signal ->
-        Logger.info("#{inspect(trend)} - #{inspect(signal)}")
+    #   %State{signal: old_signal} when old_signal != signal ->
+    #     Logger.info("#{inspect(trend)} - #{inspect(signal)}")
 
-      _ ->
-        None
-    end
+    #   _ ->
+    #     None
+    # end
 
     new_state = %{
       state
