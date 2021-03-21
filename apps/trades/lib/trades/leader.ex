@@ -6,21 +6,24 @@ defmodule Trades.Leader do
   D.Context.set(%D.Context{D.Context.get() | precision: 9})
 
   @short 60 * 10
-  @long 60 * 120
+  @long 60 * 180
   @trend 3600 * 24
-  @delta_limit 10
 
   defmodule Mas do
-    defstruct short_ma: [[0, Decimal.new(0)]],
-              long_ma: [[0, Decimal.new(0)]],
-              trend_ma: [[0, Decimal.new(0)]],
-              short_events: [[0, Decimal.new(0)]],
-              long_events: [[0, Decimal.new(0)]],
-              trend_events: [[0, Decimal.new(0)]],
+    defstruct short_ma: Deque.new(2),
+              long_ma: Deque.new(2),
+              trend_ma: Deque.new(2),
+              short_events: Deque.new(1000),
+              long_events: Deque.new(50_000),
+              trend_events: Deque.new(100_000),
               short_acc: 0,
               long_acc: 0,
               trend_acc: 0,
-              trend_deltas: [[0, Decimal.new(0)]]
+              trend_deltas: Deque.new(100),
+              trades_bucket: %{ts: 0, price: 0, count: 0},
+              short_bucket: %{ts: 0, price: 0, count: 0},
+              long_bucket: %{ts: 0, price: 0, count: 0},
+              trend_bucket: %{ts: 0, price: 0, count: 0}
   end
 
   defmodule State do
@@ -79,72 +82,132 @@ defmodule Trades.Leader do
     {:ok, state}
   end
 
-  def handle_info(event, state) do
+  def handle_info(%Streamer.Binance.TradeEvent{trade_time: t_time, price: price}, state) do
     symbol = String.downcase(state.symbol)
     mas = state.mas
     td_now = DateTime.now!("Etc/UTC")
+    ts_now = DateTime.to_unix(td_now, :second)
 
-    {ma_short, short_events, short_acc} =
-      update_ma(td_now, event, {mas.short_ma, mas.short_events, mas.short_acc}, @short)
+    {new_short, short_events, short_bucket} =
+      event_append(mas.short_events, mas.short_bucket, t_time, price)
 
-    {ma_long, long_events, long_acc} =
-      update_ma(td_now, event, {mas.long_ma, mas.long_events, mas.long_acc}, @long)
+    {new_long, long_events, long_bucket} =
+      event_append(mas.long_events, mas.long_bucket, t_time, price)
 
-    {ma_trend, trend_events, trend_acc} =
-      update_ma(td_now, event, {mas.trend_ma, mas.trend_events, mas.trend_acc}, @trend)
+    {new_trend, trend_events, trend_bucket} =
+      event_append(mas.trend_events, mas.trend_bucket, t_time, price)
 
-    new_mas = %{
+    mas = %Mas{
       mas
-      | short_ma: ma_short,
-        short_acc: short_acc,
-        short_events: short_events,
-        long_ma: ma_long,
-        long_acc: long_acc,
-        long_events: long_events,
-        trend_ma: ma_trend,
-        trend_acc: trend_acc,
-        trend_events: trend_events
+      | short_bucket: short_bucket,
+        long_bucket: long_bucket,
+        trend_bucket: trend_bucket
     }
 
-    %{trend: trend, trade: signal, trend_deltas: new_deltas} = conclusion(new_mas, @delta_limit)
+    ma_data =
+      if new_short or new_long or new_trend do
+        {rm_short_acc, short_events} =
+          sum_drop_while(short_events, 0, fn e ->
+            [time, _price] = e
+            time < ts_now - @short
+          end)
 
-    # case state do
-    #   %State{trend: old_trend} when old_trend != trend ->
-    #     Logger.info("#{inspect(trend)} - #{inspect(signal)}")
+        {short_acc, sma} = update_ma(short_events, mas.short_acc, rm_short_acc)
 
-    #   %State{signal: old_signal} when old_signal != signal ->
-    #     Logger.info("#{inspect(trend)} - #{inspect(signal)}")
+        {rm_long_acc, long_events} =
+          sum_drop_while(long_events, 0, fn e ->
+            [time, _price] = e
+            time < ts_now - @long
+          end)
 
-    #   _ ->
-    #     None
-    # end
+        {long_acc, lma} = update_ma(long_events, mas.long_acc, rm_long_acc)
 
-    new_state = %{
-      state
-      | trend: trend,
-        signal: signal,
-        mas: %{new_mas | trend_deltas: new_deltas}
-    }
+        {rm_trend_acc, trend_events} =
+          sum_drop_while(trend_events, 0, fn e ->
+            [time, _price] = e
+            time < ts_now - @trend
+          end)
 
-    [_, sma] = Enum.at(new_mas.short_ma, -1)
-    [_, lma] = Enum.at(new_mas.long_ma, -1)
-    [_, tma] = Enum.at(new_mas.trend_ma, -1)
+        {trend_acc, tma} = update_ma(trend_events, mas.trend_acc, rm_trend_acc)
 
-    Phoenix.PubSub.broadcast(
-      Streamer.PubSub,
-      "ma_events:#{symbol}",
-      %{
-        short_ma: sma,
-        long_ma: lma,
-        trend_ma: tma,
-        ts: DateTime.to_unix(td_now, :millisecond)
-      }
-    )
+        Phoenix.PubSub.broadcast(
+          Streamer.PubSub,
+          "ma_events:#{symbol}",
+          %{
+            short_ma: sma,
+            long_ma: lma,
+            trend_ma: tma,
+            ts: ts_now
+          }
+        )
 
-    {:noreply, new_state}
+        %{
+          short_ma: Deque.append(mas.short_ma, [ts_now, sma]),
+          long_ma: Deque.append(mas.long_ma, [ts_now, lma]),
+          trend_ma: Deque.append(mas.trend_ma, [ts_now, tma]),
+          short_events: short_events,
+          long_events: long_events,
+          trend_events: trend_events,
+          short_acc: short_acc,
+          long_acc: long_acc,
+          trend_acc: trend_acc
+        }
+      else
+        nil
+      end
+
+    mas =
+      if !is_nil(ma_data) do
+        %Mas{
+          mas
+          | short_ma: ma_data.short_ma,
+            long_ma: ma_data.long_ma,
+            trend_ma: ma_data.trend_ma,
+            short_events: ma_data.short_events,
+            long_events: ma_data.long_events,
+            trend_events: ma_data.trend_events,
+            short_acc: ma_data.short_acc,
+            long_acc: ma_data.long_acc,
+            trend_acc: ma_data.trend_acc
+        }
+      else
+        mas
+      end
+
+    %{trend: trend, trade: signal, trend_deltas: new_deltas} = conclusion(mas)
+
+    case state do
+      %State{trend: old_trend} when old_trend != trend ->
+        Logger.info(
+          "#{state.symbol} #{inspect(trend)} - #{inspect(signal)} - #{state.mas.short_events.size} . #{
+            state.mas.long_events.size
+          } . #{state.mas.trend_events.size}"
+        )
+
+      %State{signal: old_signal} when old_signal != signal ->
+        Logger.info(
+          "#{state.symbol} #{inspect(trend)} - #{inspect(signal)} - #{state.mas.short_events.size} . #{
+            state.mas.long_events.size
+          } . #{state.mas.trend_events.size}"
+        )
+
+      _ ->
+        None
+    end
+
+    {:noreply,
+     %State{state | trend: trend, signal: signal, mas: %{mas | trend_deltas: new_deltas}}}
   end
 
-  defp calc_delta([prev_ma, current_ma]) do
+  defp update_ma(events, events_acc, rm_events_acc) do
+    {[_time, price], _q} = Deque.pop(events)
+    new_acc = D.sub(D.add(events_acc, price), rm_events_acc)
+    new_ma = D.div(new_acc, events.size)
+
+    {new_acc, new_ma}
+  end
+
+  defp calc_delta([current_ma, prev_ma]) do
     [current_time, current_price] = current_ma
     [prev_time, prev_price] = prev_ma
     y = D.sub(current_time, prev_time)
@@ -160,32 +223,27 @@ defmodule Trades.Leader do
     [current_time, delta]
   end
 
-  defp conclusion(%Mas{} = mas, time_limit) do
-    td_now = DateTime.now!("Etc/UTC")
-    h_limit = DateTime.add(td_now, -time_limit, :second)
-    ts = DateTime.to_unix(h_limit, :millisecond)
-
-    {_, a_mas} = Enum.split(mas.trend_ma, -2)
+  defp conclusion(%Mas{
+         trend_ma: trend_ma,
+         trend_deltas: trend_deltas,
+         short_ma: short_ma,
+         long_ma: long_ma
+       }) do
+    a_mas = Enum.reverse(Enum.to_list(trend_ma))
 
     ma_delta =
       case a_mas do
         [_, _] -> calc_delta(a_mas)
-        _default -> [0, Decimal.new(0)]
+        _default -> [0, D.new(0)]
       end
 
-    trend_deltas = mas.trend_deltas ++ [ma_delta]
-
-    {_old_deltas, new_deltas} =
-      Enum.split_with(trend_deltas, fn e ->
-        [time, _avg] = e
-        time < ts
-      end)
+    trend_deltas = Deque.append(trend_deltas, ma_delta)
 
     avg =
-      if Enum.count(new_deltas) > 1 do
+      if trend_deltas.size > 1 do
         D.div(
-          Enum.reduce(new_deltas, 0, fn [_time, delta], acc -> D.add(acc, delta) end),
-          Enum.count(new_deltas)
+          Enum.reduce(trend_deltas, 0, fn [_time, delta], acc -> D.add(acc, delta) end),
+          trend_deltas.size
         )
       else
         D.new(0)
@@ -198,8 +256,19 @@ defmodule Trades.Leader do
         true -> :neutral
       end
 
-    [_t, short_ma] = Enum.at(mas.short_ma, -1)
-    [_t, long_ma] = Enum.at(mas.long_ma, -1)
+    {[_time, short_ma], _q} =
+      if short_ma.size > 0 do
+        Deque.pop(short_ma)
+      else
+        {[0, 0], None}
+      end
+
+    {[_time, long_ma], _q} =
+      if long_ma.size > 0 do
+        Deque.pop(long_ma)
+      else
+        {[0, 0], None}
+      end
 
     signal =
       cond do
@@ -208,46 +277,45 @@ defmodule Trades.Leader do
         true -> :neutral
       end
 
-    %{trend: trend, trade: signal, trend_deltas: new_deltas}
+    %{trend: trend, trade: signal, trend_deltas: trend_deltas}
   end
 
-  defp update_ma(
-         td_now,
-         %Streamer.Binance.TradeEvent{trade_time: t_time, price: price},
-         {mas, events, acc},
-         period
-       ) do
-    price = Decimal.new(price)
-    h_limit = DateTime.add(td_now, -period, :second)
-    ts = DateTime.to_unix(h_limit, :millisecond)
+  defp event_append(coll, bucket, ts, price) do
+    # convert from milli to seconds
+    ts = div(ts, 1000)
 
-    events = events ++ [[t_time, price]]
+    data =
+      cond do
+        ts != bucket.ts and bucket.count > 0 ->
+          {true, Deque.append(coll, [bucket.ts, D.div(bucket.price, bucket.count)]),
+           %{ts: ts, price: price, count: 1}}
 
-    {old_events, new_events} =
-      Enum.split_with(events, fn e ->
-        [time, _price] = e
-        time < ts
-      end)
+        ts == bucket.ts ->
+          {false, coll, %{bucket | price: D.add(price, bucket.price), count: bucket.count + 1}}
 
-    old_events_acc = Enum.reduce(old_events, 0, fn [_t, p], acc -> D.add(p, acc) end)
-
-    new_acc = Decimal.sub(Decimal.add(acc, price), old_events_acc)
-
-    # mas = mas ++ [[t_time, Decimal.div(new_acc, Enum.count(new_events))]]
-    new_ta =
-      case Enum.count(new_events) do
-        0 -> [[0, Decimal.new(0)]]
-        n_events -> [[t_time, Decimal.div(new_acc, n_events)]]
+        bucket.count == 0 ->
+          {false, coll, %{bucket | price: price, count: 1, ts: ts}}
       end
 
-    mas = mas ++ new_ta
+    data
+  end
 
-    {_old_mas, new_mas} =
-      Enum.split_with(mas, fn e ->
-        [time, _price] = e
-        time < ts
-      end)
+  def sum_drop_while(deque, acc, fun) do
+    {x, new_deque} = Deque.popleft(deque)
 
-    {new_mas, new_events, new_acc}
+    {acc, popped_que} =
+      if !is_nil(x) do
+        if fun.(x) do
+          [_time, price] = x
+          acc = D.add(acc, price)
+          sum_drop_while(new_deque, acc, fun)
+        else
+          {acc, deque}
+        end
+      else
+        {acc, deque}
+      end
+
+    {acc, popped_que}
   end
 end

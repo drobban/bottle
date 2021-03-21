@@ -4,19 +4,19 @@ defmodule Plot.Subscriber do
   import Gnuplot
 
   require Logger
+  alias Decimal, as: D
+  D.Context.set(%D.Context{D.Context.get() | precision: 9})
 
   defmodule State do
-    defstruct [
-      :symbol,
-      :trades,
-      :ma_short,
-      :ma_long,
-      :ma_trend,
-      :trades_bucket,
-      :short_bucket,
-      :long_bucket,
-      :trend_bucket
-    ]
+    defstruct symbol: None,
+              trades: Deque.new(1_000_000),
+              ma_short: Deque.new(1_000_000),
+              ma_long: Deque.new(1_000_000),
+              ma_trend: Deque.new(1_000_000),
+              trades_bucket: %{ts: 0, price: 0, count: 1},
+              short_bucket: %{ts: 0, price: 0, count: 1},
+              long_bucket: %{ts: 0, price: 0, count: 1},
+              trend_bucket: %{ts: 0, price: 0, count: 1}
   end
 
   defp set_tick() do
@@ -28,17 +28,7 @@ defmodule Plot.Subscriber do
 
     GenServer.start_link(
       __MODULE__,
-      %State{
-        symbol: symbol,
-        trades: [[0, 0]],
-        ma_short: [[0, 0]],
-        ma_long: [[0, 0]],
-        ma_trend: [[0, 0]],
-        trades_bucket: %{ts: 0, price: 0, count: 1},
-        short_bucket: %{ts: 0, price: 0, count: 1},
-        long_bucket: %{ts: 0, price: 0, count: 1},
-        trend_bucket: %{ts: 0, price: 0, count: 1}
-      },
+      %State{symbol: symbol},
       name: :"#{__MODULE__}-#{symbol}"
     )
   end
@@ -92,13 +82,13 @@ defmodule Plot.Subscriber do
 
     available =
       Enum.filter(plots_data, fn [_title, data] ->
-        Enum.count(data) > 1
+        data.size > 1
       end)
       |> Enum.reduce(%{titles: [], data: []}, fn [title, points], m ->
-        %{m | titles: m.titles ++ [title], data: m.data ++ [points]}
+        %{m | titles: m.titles ++ [title], data: m.data ++ [Enum.to_list(points)]}
       end)
 
-    if !Enum.empty?(state.trades) do
+    if state.trades.size > 0 do
       try do
         _stat =
           plot(
@@ -124,34 +114,22 @@ defmodule Plot.Subscriber do
         %{short_ma: short_ma, long_ma: long_ma, trend_ma: trend_ma, ts: ts},
         state
       ) do
-    {short, short_bucket} =
-      event_append(state.ma_short, state.short_bucket, ts, Decimal.to_float(short_ma))
+    ts = ts * 1000
 
-    {long, long_bucket} =
-      event_append(state.ma_long, state.long_bucket, ts, Decimal.to_float(long_ma))
+    {short, short_bucket} =
+      event_append(state.ma_short, state.short_bucket, ts, D.to_float(short_ma))
+
+    {long, long_bucket} = event_append(state.ma_long, state.long_bucket, ts, D.to_float(long_ma))
 
     {trend, trend_bucket} =
-      event_append(state.ma_trend, state.trend_bucket, ts, Decimal.to_float(trend_ma))
+      event_append(state.ma_trend, state.trend_bucket, ts, D.to_float(trend_ma))
 
     dt = DateTime.add(DateTime.now!("Etc/UTC"), -(12 * 3600), :second)
+    ts = DateTime.to_unix(dt, :second)
 
-    {_old, ma_short} =
-      Enum.split_with(short, fn e ->
-        [time, _price] = e
-        time < DateTime.to_unix(dt, :second)
-      end)
-
-    {_old, ma_long} =
-      Enum.split_with(long, fn e ->
-        [time, _price] = e
-        time < DateTime.to_unix(dt, :second)
-      end)
-
-    {_old, ma_trend} =
-      Enum.split_with(trend, fn e ->
-        [time, _price] = e
-        time < DateTime.to_unix(dt, :second)
-      end)
+    ma_short = drop_while(short, fn [time, _price] -> time < ts end)
+    ma_long = drop_while(long, fn [time, _price] -> time < ts end)
+    ma_trend = drop_while(trend, fn [time, _price] -> time < ts end)
 
     new_state = %{
       state
@@ -168,15 +146,11 @@ defmodule Plot.Subscriber do
 
   def handle_info(%Streamer.Binance.TradeEvent{trade_time: t_time, price: price}, state) do
     {price, _} = Float.parse(price)
-    # t = state.trades ++ [[t_time, price]]
     {t, bucket} = event_append(state.trades, state.trades_bucket, t_time, price)
+    dt = DateTime.add(DateTime.now!("Etc/UTC"), -(12 * 3600), :second)
+    ts = DateTime.to_unix(dt, :second)
 
-    {_old_trades, trades} =
-      Enum.split_with(t, fn e ->
-        [time, _price] = e
-        dt = DateTime.add(DateTime.now!("Etc/UTC"), -(12 * 3600), :second)
-        time < DateTime.to_unix(dt, :second)
-      end)
+    trades = drop_while(t, fn [time, _price] -> time < ts end)
 
     new_state = %{state | trades: trades, trades_bucket: bucket}
 
@@ -199,7 +173,7 @@ defmodule Plot.Subscriber do
     {new_coll, bucket} =
       cond do
         current_ts != bucket.ts ->
-          {coll ++ [[bucket.ts, bucket.price / bucket.count]],
+          {Deque.append(coll, [bucket.ts, bucket.price / bucket.count]),
            %{ts: current_ts, price: price, count: 1}}
 
         current_ts == bucket.ts ->
@@ -207,5 +181,22 @@ defmodule Plot.Subscriber do
       end
 
     {new_coll, bucket}
+  end
+
+  def drop_while(deque, fun) do
+    {x, new_deque} = Deque.popleft(deque)
+
+    popped_que =
+      if !is_nil(x) do
+        if fun.(x) do
+          drop_while(new_deque, fun)
+        else
+          deque
+        end
+      else
+        deque
+      end
+
+    popped_que
   end
 end

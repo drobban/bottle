@@ -29,6 +29,9 @@ defmodule Plot.MixProject do
       {:gnuplot, "~> 1.20.320"},
       {:phoenix_pubsub, "~> 2.0"},
       {:decimal, "~> 2.0"},
+      {:deque,
+       git: "https://github.com/drobban/deque.git",
+       ref: "49076ecb0ea6283577edcb008cdf185dfb4a3f54"},
       {:streamer, in_umbrella: true}
     ]
   end
